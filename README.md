@@ -17,6 +17,8 @@ The workflow reads your Pages base path automatically, so repository names and c
 
 Choose one of the first three groups, click its seats in a single vehicle, and confirm. Single riders fill remaining seats. Main queues replenish; Taron fastpass arrivals are intermittent. All five attractions retain separate shifts in local storage. Timed mode runs the currently selected attraction only, with 1×, 2× and 5× speed options. Manual mode pauses the countdown and allows dispatch at any time.
 
+New groups are mostly pairs (45%) and fours (30%), with trios (18%), solo guests (4%), fives (2%), and sixes (1%). This applies to main, tour, side, and fastpass queues. Single-rider groups always contain one guest. Existing saved groups keep their sizes; reset a shift to immediately regenerate its queues.
+
 Dispatch intervals: Danse Macabre 5 minutes; Hollander 2 minutes per station, offset by 1 minute; Symbolica 45 seconds; Joris en de Draak 2 minutes; Taron 1 minute. Manually dispatching a Hollander station schedules the other station next in 1 minute, keeping timed departures alternating.
 
 Accessibility arrivals are generated for station A, reserving 1–3 seats in row 3 and counting those guests automatically. Symbolica is displayed front to back: Muziektour, Heldentour, Schattentour. Every row has exactly 3 seats.

@@ -6,7 +6,17 @@ export const RIDES = [
   { id:'taron',name:'Taron',subtitle:'Keep the trains full. Keep the queues moving.',type:'Launch coaster',interval:60,units:[{id:'train',name:'Train · 4 cars',rows:Array(8).fill(2),queue:'regular'}],queues:[['regular','Main queue'],['fast','Fastpass'],['single','Single riders']] }
 ];
 let serial = Date.now();
-export function makeGroup(queue, cycle=0) { return {id:++serial,size:queue==='single'?1:1+Math.floor(Math.random()*6),queue,arrival:cycle}; }
+// 75% pairs or fours; 18% trios; 4% solo guests; 3% larger groups.
+function groupSize() {
+ const roll = Math.random();
+ if (roll < 0.45) return 2;
+ if (roll < 0.75) return 4;
+ if (roll < 0.93) return 3;
+ if (roll < 0.97) return 1;
+ if (roll < 0.99) return 5;
+ return 6;
+}
+export function makeGroup(queue, cycle=0) { return {id:++serial,size:queue==='single'?1:groupSize(),queue,arrival:cycle}; }
 export function makeState(ride) {
  const queues=Object.fromEntries(ride.queues.map(([q])=>[q,Array.from({length:q==='fast'?2:8},()=>makeGroup(q))]));
  const state={queues,seats:Object.fromEntries(ride.units.map(u=>[u.id,u.rows.map(n=>Array(n).fill(null))])),remaining:Object.fromEntries(ride.units.map((u,i)=>[u.id,ride.id==='hollander'?(i+1)*60:ride.interval])),cycles:0,history:[],assignments:[],notice:'',reserved:0};
@@ -46,7 +56,7 @@ export function dispatch(ride,state,unitIds=ride.units.map(u=>u.id),manual=false
  next.history.push({occupied,capacity,penalty:Math.min(25,overdue*2),units:unitIds,cycle:next.cycles});
  next.assignments=next.assignments.filter(a=>!unitIds.includes(a.positions[0].unit));
  if(ride.id==='hollander'&&unitIds.includes('A'))reserveAccess(next,Math.random()<0.45?1+Math.floor(Math.random()*3):0);
- if(ride.id==='taron'&&Math.random()<0.75){const arrivals=1+Math.floor(Math.random()*5);for(let i=0;i<arrivals;i++)next.queues.fast.push(makeGroup('fast',next.cycles));}
+ if(ride.id==='taron'&&Math.random()<0.8){const arrivals=1+Math.floor(Math.random()*6);for(let i=0;i<arrivals;i++)next.queues.fast.push(makeGroup('fast',next.cycles));}
  next.notice=`Dispatched ${occupied}/${capacity} guests.${overdue?` Fastpass waiting penalty: −${Math.min(25,overdue*2)} points.`:''}`;
  return next;
 }
