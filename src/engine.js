@@ -4,7 +4,7 @@ export const RIDES = [
   { id: 'symbolica', name: 'Symbolica', subtitle: 'Three tours. A little magic in every row.', type:'Trackless dark ride', interval:45, units:[['music','Muziektour'],['hero','Heldentour'],['treasure','Schattentour']].map(([id,name])=>({id,name,rows:[3,3],queue:id})), queues:[['music','Muziektour'],['hero','Heldentour'],['treasure','Schattentour'],['single','Single riders']] },
   { id:'joris',name:'Joris en de Draak',subtitle:'Water versus fire. Dispatch together.',type:'Dueling coaster',interval:120,units:['Water','Fire'].map(x=>({id:x.toLowerCase(),name:x,rows:Array(12).fill(2),queue:x.toLowerCase()})),queues:[['water','Water queue'],['fire','Fire queue'],['single','Single riders']] },
   { id:'taron',name:'Taron',subtitle:'Keep the trains full. Keep the queues moving.',type:'Launch coaster',interval:60,units:[{id:'train',name:'Train · 4 cars',rows:Array(8).fill(2),queue:'regular'}],queues:[['regular','Main queue'],['fast','Fastpass'],['single','Single riders']] },
-  { id:'hagrid',name:"Hagrid’s Motorbike Adventure",subtitle:'Seven moving cars. Keep pace with the platform.',type:'Moving station',interval:48,units:[{id:'train',name:'Train · 7 cars',rows:Array(7).fill(2),queue:'regular'}],queues:[['regular','Main queue'],['fast','Fastpass'],['single','Single riders']] },
+  { id:'hagrid',name:"Hagrid’s Motorbike Adventure",subtitle:'Seven moving cars. Keep pace with the platform.',type:'Moving station',interval:87,units:[{id:'train',name:'Train · 7 cars',rows:Array(7).fill(2),queue:'regular'}],queues:[['regular','Main queue'],['fast','Fastpass'],['single','Single riders']] },
   { id:'rise',name:'Rise of the Resistance',subtitle:'Four stations. One departure queue.',type:'Trackless dark ride',interval:25,units:['A','B','C','D'].flatMap(station=>[1,2].map(n=>({id:`${station}${n}`,station,name:`Station ${station} · Vehicle ${n}`,rows:[4,4],colors:n===1?['Red','Blue']:['Silver','Orange'],queue:'regular'}))),queues:[['regular','Main queue'],['single','Single riders']] }
 ];
 let serial = Date.now();
@@ -23,12 +23,19 @@ export function makeState(ride) {
  const queues=Object.fromEntries(ride.queues.map(([q])=>[q,Array.from({length:q==='fast'?2:8},()=>makeGroup(q))]));
  const state={queues,seats:Object.fromEntries(ride.units.map(u=>[u.id,u.rows.map(n=>Array(n).fill(null))])),remaining:Object.fromEntries(ride.units.map((u,i)=>[u.id,ride.id==='hollander'?(i+1)*60:ride.interval])),cycles:0,history:[],assignments:[],notice:'',reserved:0};
  if(ride.id==='hollander') reserveAccess(state,2);
- if(ride.id==='hagrid')state.hagrid={phase:'idle',elapsed:0,remaining:0,pending:[],stops:0,config:{interval:6,window:12,gap:8}};
+ if(ride.id==='hagrid')state.hagrid={phase:'idle',elapsed:0,remaining:0,pending:[],stops:0,config:{interval:6,overlap:15,window:51,gap:8}};
  if(ride.id==='rise')state.rise={ready:[],replacement:{A:0,B:0,C:0,D:0},nextSlot:25,missed:0};
  return state;
 }
 export function restoreSessions(saved) {
  const restored=Object.fromEntries(RIDES.map(r=>[r.id,saved?.[r.id]?.seats&&r.units.every(u=>saved[r.id].seats[u.id])?saved[r.id]:makeState(r)]));
+ if(!Number.isFinite(restored.hagrid.hagrid.config.overlap)){
+  // Upgrade short legacy windows without resetting guests, queues, scores, or platform progress.
+  restored.hagrid=structuredClone(restored.hagrid);
+  const config=restored.hagrid.hagrid.config;
+  config.overlap=Math.max(5,Math.min(60,config.window>6*config.interval?config.window-6*config.interval:15));
+  config.window=6*config.interval+config.overlap;
+ }
  // Incomplete selections are transient UI state; committed reservations are retained.
  if(restored.hagrid.hagrid.pending.length)restored.hagrid=setHagridPending(restored.hagrid,[]);
  return restored;
@@ -38,11 +45,42 @@ export function canUse(ride,group,unitId) {
  const u=ride.units.find(u=>u.id===unitId);
  return !!u && (group.queue==='single'||group.queue===u.queue||(['taron','hagrid'].includes(ride.id)&&group.queue==='fast'));
 }
+export function canLoadRow(ride,state,unit,row,positions=[]) {
+ const vehicle=ride.units.find(u=>u.id===unit);
+ if(!vehicle||!Number.isInteger(row)||row<0||row>=vehicle.rows.length)return false;
+ if(ride.id==='hagrid')return carStatus(state,row)==='loading';
+ if(ride.id==='rise')return stationOpen(state,vehicle.station);
+ if(ride.id==='danse')return state.seats[unit].slice(0,row).every((seats,r)=>seats.every((guest,seat)=>guest!==null||positions.some(p=>p.unit===unit&&p.row===r&&p.seat===seat)));
+ return true;
+}
+export function selectionValid(ride,state,group,positions) {
+ if(!group)return false;
+ if(!state.queues[group.queue]?.slice(0,3).some(g=>g.id===group.id))return false;
+ return positions.every(p=>{
+  if(state.seats[p.unit]?.[p.row]?.[p.seat]!==null||!canUse(ride,group,p.unit))return false;
+  if(ride.id==='rise'&&!stationOpen(state,ride.units.find(u=>u.id===p.unit)?.station))return false;
+  if(!canLoadRow(ride,state,p.unit,p.row,positions))return false;
+  return true;
+ });
+}
+export function selectSeats(state,group,positions,clicked,fillRow=false) {
+ const same=(a,b)=>a.unit===b.unit&&a.row===b.row&&a.seat===b.seat;
+ if(!fillRow&&positions.some(p=>same(p,clicked)))return positions.filter(p=>!same(p,clicked));
+ const row=state.seats[clicked.unit]?.[clicked.row];
+ if(!group||row?.[clicked.seat]!==null||positions.some(p=>p.unit!==clicked.unit))return positions;
+ const remaining=group.size-positions.length;if(remaining<=0)return positions;
+ // Prefer the clicked seat, then seats to its right, wrapping to the start of the row.
+ const available=Array.from({length:row.length},(_,i)=>({...clicked,seat:(clicked.seat+i)%row.length}))
+  .filter(p=>row[p.seat]===null&&!positions.some(existing=>same(existing,p)));
+ const count=fillRow?Math.min(remaining,available.length):1;
+ return [...positions,...available.slice(0,count)];
+}
 export function assign(ride,state,group,positions) {
  if(!group||positions.length!==group.size)return {error:'Choose exactly one seat for every guest in this group.'};
  const unitId=positions[0]?.unit;
  if(ride.id==='rise'&&!stationOpen(state,ride.units.find(u=>u.id===unitId)?.station))return {error:'This station is ready for dispatch or waiting for replacement vehicles.'};
- if(ride.id==='hagrid'&&positions.some(p=>carStatus(state,p.row)==='closed'||state.hagrid.phase!=='running'))return {error:'Choose cars that are loading now or still approaching.'};
+ if(ride.id==='hagrid'&&positions.some(p=>!canLoadRow(ride,state,p.unit,p.row)))return {error:'Cars can only be loaded while inside the loading window.'};
+ if(ride.id==='danse'&&positions.some(p=>!canLoadRow(ride,state,p.unit,p.row,positions)))return {error:'Fill the earlier rows in this chamber before loading the next row.'};
  if(positions.some(p=>p.unit!==unitId)||!canUse(ride,group,unitId))return {error:'Keep this group in one eligible vehicle.'};
  if(new Set(positions.map(p=>`${p.unit}:${p.row}:${p.seat}`)).size!==positions.length||positions.some(p=>state.seats[p.unit]?.[p.row]?.[p.seat]!==null))return {error:'Choose available seats only.'};
  const queue=state.queues[group.queue]; const index=queue.findIndex(g=>g.id===group.id);
@@ -132,12 +170,14 @@ export function carStatus(state,row){
 export function hagridDeadline(state){return 6*state.hagrid.config.interval+state.hagrid.config.window;}
 export function startHagrid(state){
  if(state.hagrid.phase!=='idle')return state;
- const next=structuredClone(state);next.hagrid.phase='running';next.hagrid.elapsed=0;next.notice='Train entering. Reserve upcoming cars; groups board automatically when their car arrives.';return next;
+ const next=structuredClone(state);next.hagrid.phase='running';next.hagrid.elapsed=0;next.notice='Train entering. Load only cars currently inside the loading window.';return next;
 }
 export function setHagridTiming(state,key,value){
  if(state.hagrid.phase!=='idle')return state;
- const bounds={interval:[2,20],window:[4,40],gap:[0,60]};if(!bounds[key])return state;
- const next=structuredClone(state);next.hagrid.config[key]=Math.max(bounds[key][0],Math.min(bounds[key][1],Number(value)||bounds[key][0]));return next;
+ const bounds={interval:[2,20],overlap:[5,60],gap:[0,60]};if(!bounds[key])return state;
+ const next=structuredClone(state);next.hagrid.config[key]=Math.max(bounds[key][0],Math.min(bounds[key][1],Number(value)||bounds[key][0]));
+ next.hagrid.config.window=6*next.hagrid.config.interval+next.hagrid.config.overlap;
+ return next;
 }
 export function setHagridPending(state,positions){const next=structuredClone(state);next.hagrid.pending=positions;return next;}
 export function canDispatchHagrid(state){
