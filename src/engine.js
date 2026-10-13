@@ -47,9 +47,22 @@ export function undo(state) {
  a.positions.forEach(p=>next.seats[p.unit][p.row][p.seat]=null);
  next.queues[a.group.queue].splice(a.index,0,a.group);next.notice='Last assignment returned to the queue.';return next;
 }
-export function dispatch(ride,state,unitIds=ride.units.map(u=>u.id),manual=false) {
+export function dispatchCooldown(state,now=Date.now()) {
+ return Math.max(0,Math.ceil(((state.manualDispatchReadyAt||0)-now)/1000));
+}
+export function loadingCooldown(state,unitId,now=Date.now()) {
+ return Math.max(0,Math.ceil(((state.loadingReadyAt?.[unitId]||0)-now)/1000));
+}
+export function dispatch(ride,state,unitIds=ride.units.map(u=>u.id),manual=false,cooldown=0,now=Date.now()) {
+ if(manual&&dispatchCooldown(state,now)>0)return state;
  const next=structuredClone(state);let occupied=0,capacity=0;
  for(const id of unitIds) {const rows=next.seats[id];occupied+=rows.flat().filter(Boolean).length;capacity+=rows.flat().length;next.seats[id]=rows.map(r=>r.map(()=>null));next.remaining[id]=ride.interval;}
+ if(manual){
+  const readyAt=now+Math.max(0,Math.min(300,Number(cooldown)||0))*1000;
+  next.manualDispatchReadyAt=readyAt;
+  next.loadingReadyAt={...next.loadingReadyAt};
+  for(const id of unitIds)next.loadingReadyAt[id]=readyAt;
+ }
  if(manual&&ride.id==='hollander'&&unitIds.length===1)next.remaining[unitIds[0]==='A'?'B':'A']=60;
  next.cycles++;
  const overdue=(next.queues.fast||[]).filter(g=>next.cycles-g.arrival>3).reduce((n,g)=>n+g.size,0);
